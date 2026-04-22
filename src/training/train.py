@@ -1,6 +1,9 @@
 """Loop de treinamento de Q-learning."""
 
+import os
 import time
+import shutil
+from datetime import datetime
 from typing import Dict
 
 from environment.carla_env import CarlaEnvironment
@@ -93,7 +96,19 @@ def train(config: Dict) -> None:
             logger.info(f"Episode {episode+1}/{config.get('episodes')} reward={episode_reward:.2f}")
 
         # Salva o progresso após o sucesso de todos os episódios
-        agent.save(config.get("q_table_path", "assets/q_table.npy"))
+        q_table_path = config.get("q_table_path", "assets/q_table.npy")
+        load_pretrained = config.get("load_pretrained", True)
+        
+        # Se estava usando Q-table pré-treinada, fazer backup antes de salvar
+        if load_pretrained and os.path.exists(q_table_path):
+            backup_path = q_table_path.replace(".npy", f"_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.npy")
+            try:
+                shutil.copy2(q_table_path, backup_path)
+                logger.info(f"Backup criado: {backup_path}")
+            except Exception as e:
+                logger.warning(f"Erro ao criar backup: {e}")
+        
+        agent.save(q_table_path)
         
         # Exibir resumo final
         summary = data_logger.get_summary()

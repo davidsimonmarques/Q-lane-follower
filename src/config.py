@@ -12,8 +12,12 @@ CONFIG = {
     "epsilon_decay": 0.995,
     "log_level": "INFO",
     "q_table_path": "assets/q_table.npy",
+    
+    "load_pretrained": False,  # Se True: carrega Q-table existente. Se False: começa do zero
+
+    # CONFIGURAÇÕES DE CAMERA E RENDER
     "render": False, #render do cv2 - camera frontal
-    "no_rendering": False,  # Desabilitar renderização CARLA para treinamento mais rápido
+    "no_rendering": True,  # Desabilitar renderização CARLA para treinamento mais rápido
     "success_distance": 2000,  # Distância em metros para sucesso (2km)
     "speed_penalty_threshold": 6,  # Velocidade mínima em m/s para evitar penalidade
     "speed_penalty_weight": 0.0,  # Peso da penalidade por velocidade baixa
@@ -25,7 +29,7 @@ CONFIG = {
     "top_down_height": 20.0,
     "top_down_pitch": -90.0,
 
-    # 🚀 OTIMIZAÇÕES DE PERFORMANCE
+    # OTIMIZAÇÕES DE PERFORMANCE
     "synchronous": False,  # Modo assíncrono para treinamento mais rápido
     "fixed_delta_seconds": 0.1,  # Timestep maior para menos cálculos de física
     "disable_camera": True,  # Desabilitar câmera completamente durante treinamento

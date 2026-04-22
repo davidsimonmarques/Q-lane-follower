@@ -168,8 +168,7 @@ class CarlaEnvironment:
         # 🚀 OTIMIZAÇÃO: Cálculo de velocidade mais eficiente (evitar np.linalg.norm)
         speed = (velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z) ** 0.5
 
-        # Obter waypoint na mesma faixa e direção do carro
-        waypoint = self._get_lane_waypoint(transform.location, transform.rotation.yaw)
+        waypoint = self.map.get_waypoint(transform.location, project_to_road=True, lane_type=carla.LaneType.Driving)
         lane_offset = self._compute_lane_offset(transform.location, waypoint)
         heading_error = self._compute_heading_error(transform.rotation.yaw, waypoint.transform.rotation.yaw)
 
@@ -183,39 +182,6 @@ class CarlaEnvironment:
             "heading_error": heading_error,
             "offroad": waypoint is None,
         }
-
-    def _get_lane_waypoint(self, location: carla.Location, vehicle_yaw: float) -> carla.Waypoint:
-        """Obtém waypoint na mesma faixa e direção do veículo.
-        
-        Isso evita que o agente seja confundido por faixas adjacentes ou direções opostas.
-        """
-        # Obter waypoint inicial mais próximo
-        waypoint = self.map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Driving)
-        
-        if waypoint is None:
-            return waypoint
-        
-        # Guardar ID da faixa atual
-        current_lane_id = waypoint.lane_id
-        
-        # Verificar se o waypoint está na mesma faixa
-        # Se não estiver, procurar o waypoint correto seguindo next() ou previous()
-        search_distance = 30  # Procurar até 30 metros adiante
-        distance_traveled = 0
-        
-        while waypoint and distance_traveled < search_distance:
-            # Se encontrou waypoint na mesma faixa, usar
-            if waypoint.lane_id == current_lane_id:
-                return waypoint
-            # Tentar seguir para frente na mesma direção
-            if waypoint.next(1.0):  # 1 metro adiante
-                waypoint = waypoint.next(1.0)[0]
-                distance_traveled += 1.0
-            else:
-                break
-        
-        # Fallback: retornar waypoint da faixa mais próxima
-        return self.map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Driving)
 
     def _compute_lane_offset(self, location: carla.Location, waypoint: carla.Waypoint) -> float:
         if waypoint is None:
