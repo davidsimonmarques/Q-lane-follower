@@ -2,13 +2,20 @@
 
 import csv
 import os
+from datetime import datetime
 from typing import List, Optional
 
 class DataLogger:
     """Logger para salvar dados de treinamento em CSV."""
 
-    def __init__(self, log_dir: str = "logs", filename: str = "training_data.csv"):
+    def __init__(self, log_dir: str = "logs", filename: Optional[str] = None):
         self.log_dir = log_dir
+        
+        # Se filename não fornecido, gerar automaticamente com timestamp
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"training_data_{timestamp}.csv"
+        
         self.filename = filename
         self.filepath = os.path.join(log_dir, filename)
 
