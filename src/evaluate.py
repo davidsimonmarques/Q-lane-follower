@@ -1,5 +1,7 @@
 """Avaliação do modelo treinado em lane following."""
 
+import random
+
 import carla
 import pygame
 import numpy as np
@@ -32,7 +34,7 @@ class EvaluationConfig:
         self.synchronous = True
         self.fixed_delta_seconds = 0.1
         self.disable_camera = False
-        self.max_fps = 60
+        self.max_fps = 30
         
         # Visualização
         self.display_width = 1280
@@ -50,16 +52,24 @@ class EvaluationConfig:
         }
         
         # Action map
+        # self.action_map = {
+        #     0: {"throttle": 0.1, "steer": -1.0, "brake": 0.0},
+        #     1: {"throttle": 0.2, "steer": -0.5, "brake": 0.0},
+        #     2: {"throttle": 0.2, "steer": -0.1, "brake": 0.0},
+        #     3: {"throttle": 0.3, "steer":  0.0, "brake": 0.0},
+        #     4: {"throttle": 0.2, "steer":  0.1, "brake": 0.0},
+        #     5: {"throttle": 0.2, "steer":  0.5, "brake": 0.0},
+        #     6: {"throttle": 0.1, "steer":  1.0, "brake": 0.0},
+        # }
         self.action_map = {
-            0: {"throttle": 0.1, "steer": -1.0, "brake": 0.0},
-            1: {"throttle": 0.2, "steer": -0.5, "brake": 0.0},
-            2: {"throttle": 0.2, "steer": -0.1, "brake": 0.0},
-            3: {"throttle": 0.3, "steer":  0.0, "brake": 0.0},
-            4: {"throttle": 0.2, "steer":  0.1, "brake": 0.0},
-            5: {"throttle": 0.2, "steer":  0.5, "brake": 0.0},
-            6: {"throttle": 0.1, "steer":  1.0, "brake": 0.0},
+        0: {"throttle": 0.2, "steer": -1.0, "brake": 0.0}, # Esquerda Máxima
+        1: {"throttle": 0.3, "steer": -0.5, "brake": 0.0}, # Esquerda Forte
+        2: {"throttle": 0.3, "steer": -0.1, "brake": 0.0}, # Esquerda Suave
+        3: {"throttle": 0.4, "steer":  0.0, "brake": 0.0}, # Centro (Reto)
+        4: {"throttle": 0.3, "steer":  0.1, "brake": 0.0}, # Direita Suave
+        5: {"throttle": 0.3, "steer":  0.5, "brake": 0.0}, # Direita Forte
+        6: {"throttle": 0.2, "steer":  1.0, "brake": 0.0}, # Direita Máxima
         }
-        
         # Duração
         self.max_steps = 2000
         self.success_distance = 2000
@@ -122,7 +132,7 @@ class HUD:
     def __init__(self, width, height):
         self.dim = (width, height)
         font = pygame.font.Font(pygame.font.get_default_font(), 20)
-        self._font_mono = pygame.font.Font(None, 12)
+        self._font_mono = pygame.font.Font(None, 24)
         self._info_text = []
     
     def tick(self, vehicle, distance, steps, action, observation, speed_kmh):
@@ -150,7 +160,7 @@ class HUD:
     def render(self, display):
         """Renderiza painel HUD."""
         # Painel semi-transparente
-        panel_width = 220
+        panel_width = 250
         panel = pygame.Surface((panel_width, self.dim[1]))
         panel.set_alpha(180)
         panel.fill((0, 0, 0))
@@ -162,7 +172,7 @@ class HUD:
             if line:
                 text_surface = self._font_mono.render(line, True, (255, 255, 255))
                 display.blit(text_surface, (10, v_offset))
-            v_offset += 16
+            v_offset += 28
 
 
 def get_observation(vehicle, world):
@@ -256,7 +266,7 @@ def main():
         if not spawn_points:
             raise RuntimeError("Nenhum spawn point disponível")
         
-        spawn_point = spawn_points[0]
+        spawn_point = random.choice(spawn_points)
         vehicle = world.spawn_actor(vehicle_bp, spawn_point)
         vehicle.set_autopilot(False)
         
@@ -283,6 +293,9 @@ def main():
         
         # Criar HUD
         hud = HUD(config.display_width, config.display_height)
+        
+        # Referência para o Spectator (Câmera do carla.exe)
+        spectator = world.get_spectator()
         
         # Observação inicial
         print("Iniciando avaliação...")
@@ -323,6 +336,12 @@ def main():
                 world.tick()
             else:
                 world.wait_for_tick()
+            
+            # Atualizar a visão do spectator no carla.exe (visão superior)
+            transform = vehicle.get_transform()
+            position = transform.location + carla.Location(z=40.0)
+            rotation = carla.Rotation(pitch=-90.0, yaw=0.0)
+            spectator.set_transform(carla.Transform(position, rotation))
             
             # Atualizar observação
             observation = get_observation(vehicle, world)
