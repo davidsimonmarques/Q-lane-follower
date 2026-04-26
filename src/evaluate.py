@@ -17,6 +17,7 @@ logging.getLogger('pygame').setLevel(logging.CRITICAL)
 
 # Importar módulos do projeto
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from config import CONFIG
 from agent.q_learning_agent import QLearningAgent
 from state.state_discretizer import StateDiscretizer
 from reward.reward_function import RewardFunction
@@ -45,31 +46,10 @@ class EvaluationConfig:
         self.load_pretrained = True
         
         # Estado discretizado
-        self.discretizer_bins = {
-            "lane_offset": [-0.5, -0.2, 0.0, 0.2, 0.5],
-            "heading_error": [-0.4, -0.2, 0.0, 0.2, 0.4],
-            "speed": [2.0, 4.0, 6.0, 8.0, 10.0]
-        }
+        self.discretizer_bins = CONFIG["discretizer_bins"]
         
         # Action map
-        # self.action_map = {
-        #     0: {"throttle": 0.1, "steer": -1.0, "brake": 0.0},
-        #     1: {"throttle": 0.2, "steer": -0.5, "brake": 0.0},
-        #     2: {"throttle": 0.2, "steer": -0.1, "brake": 0.0},
-        #     3: {"throttle": 0.3, "steer":  0.0, "brake": 0.0},
-        #     4: {"throttle": 0.2, "steer":  0.1, "brake": 0.0},
-        #     5: {"throttle": 0.2, "steer":  0.5, "brake": 0.0},
-        #     6: {"throttle": 0.1, "steer":  1.0, "brake": 0.0},
-        # }
-        self.action_map = {
-        0: {"throttle": 0.2, "steer": -1.0, "brake": 0.0}, # Esquerda Máxima
-        1: {"throttle": 0.3, "steer": -0.5, "brake": 0.0}, # Esquerda Forte
-        2: {"throttle": 0.3, "steer": -0.1, "brake": 0.0}, # Esquerda Suave
-        3: {"throttle": 0.4, "steer":  0.0, "brake": 0.0}, # Centro (Reto)
-        4: {"throttle": 0.3, "steer":  0.1, "brake": 0.0}, # Direita Suave
-        5: {"throttle": 0.3, "steer":  0.5, "brake": 0.0}, # Direita Forte
-        6: {"throttle": 0.2, "steer":  1.0, "brake": 0.0}, # Direita Máxima
-        }
+        self.action_map = CONFIG["action_map"]
         # Duração
         self.max_steps = 2000
         self.success_distance = 2000
