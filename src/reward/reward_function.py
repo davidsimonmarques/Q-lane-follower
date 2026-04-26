@@ -8,9 +8,7 @@ class RewardFunction:
         self.lane_center_penalty = config.get("lane_center_penalty", 1.0)
         self.heading_penalty = config.get("heading_penalty", 0.5)
         self.offroad_penalty = config.get("offroad_penalty", 5.0)
-        self.speed_reward = config.get("speed_reward", 0.1)
-        self.speed_penalty_threshold = config.get("speed_penalty_threshold", 1.0)
-        self.speed_penalty_weight = config.get("speed_penalty_weight", 0.1)
+        self.speed_reward = config.get("speed_reward", 0.15)
 
     def compute(self, observation: Dict, action: int, done: bool) -> float:
         lane_offset = abs(observation.get("lane_offset", 0.0))
@@ -23,8 +21,12 @@ class RewardFunction:
         # Recompensa por manter-se na pista (maior no centro)
         reward = 1.0 - (lane_offset / 2.0)  # 1.0 no centro, 0 nas bordas
         
-        # Bônus pequeno por progresso
-        reward += 0.1
+        # Bônus de velocidade (substituindo o bônus de progresso)
+        # Normalizado entre 0 e 0.15. Consideramos 10 m/s (~36 km/h) como referência.
+        speed = observation.get("speed", 0.0)
+        max_speed_ref = 10.0
+        speed_bonus = min(self.speed_reward , (speed / max_speed_ref) * self.speed_reward)
+        reward += speed_bonus
         
         # Bônus de sucesso (apenas quando completa a distância)
         if done and not is_offroad:

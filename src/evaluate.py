@@ -35,7 +35,7 @@ class EvaluationConfig:
         self.synchronous = True
         self.fixed_delta_seconds = 0.1
         self.disable_camera = False
-        self.max_fps = 30
+        self.max_fps = 60
         
         # Visualização
         self.display_width = 1280
