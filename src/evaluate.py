@@ -7,6 +7,7 @@ import pygame
 import numpy as np
 import math
 import os
+import cv2
 import sys
 import logging
 from datetime import datetime
@@ -53,6 +54,12 @@ class EvaluationConfig:
         # Duração
         self.max_steps = 2000
         self.success_distance = 2000
+        
+        # Gravação
+        self.record_pygame = True
+        self.record_carla = True
+        self.pygame_video_path = "evaluation_pygame.mp4"
+        self.carla_rec_path = "evaluation_carla.log"
 
 
 class CameraManager:
@@ -257,6 +264,17 @@ def main():
     print("Conectando ao CARLA...")
     client = carla.Client(config.host, config.port)
     client.set_timeout(10.0)
+    
+    # Iniciar gravador CARLA (salva um .log para replay)
+    carla_recorder_started = False
+    if config.record_carla:
+        try:
+            client.start_recorder(config.carla_rec_path)
+            carla_recorder_started = True
+            print(f"Gravador CARLA iniciado. Salvando em: {config.carla_rec_path}")
+        except Exception as e:
+            print(f"Não foi possível iniciar o gravador CARLA: {e}")
+            
     world = client.get_world()
     
     # Configurar modo síncrono/assíncrono
@@ -270,6 +288,7 @@ def main():
     
     vehicle = None
     camera_manager = None
+    pygame_video_writer = None
     
     try:
         # Inicializar ambiente CARLA
@@ -308,6 +327,19 @@ def main():
         # Criar HUD
         hud = HUD(config.display_width, config.display_height)
         
+        # Iniciar gravador de vídeo Pygame (salva um .mp4)
+        if config.record_pygame:
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            # Usar o FPS do clock para o vídeo, com um padrão de 60
+            fps = 60.0
+            pygame_video_writer = cv2.VideoWriter(
+                config.pygame_video_path, 
+                fourcc, 
+                fps, 
+                (config.display_width, config.display_height)
+            )
+            print(f"Gravador Pygame iniciado. Salvando em: {config.pygame_video_path}")
+            
         # Referência para o Spectator (Câmera do carla.exe)
         spectator = world.get_spectator()
         
@@ -318,6 +350,7 @@ def main():
         previous_location = vehicle.get_location()
         steps = 0
         done = False
+        
         
         start_time = datetime.now()
         
@@ -388,6 +421,14 @@ def main():
             fps_text = pygame.font.Font(None, 16).render(f"FPS: {fps:.1f}", True, (0, 255, 0))
             display.blit(fps_text, (10, config.display_height - 20))
             
+            # Gravar frame do Pygame
+            if pygame_video_writer:
+                # Captura o frame do display do pygame
+                frame = pygame.surfarray.array3d(display)
+                # Converte de (width, height, RGB) para (height, width, RGB) e depois para BGR
+                frame = cv2.cvtColor(frame.swapaxes(0, 1), cv2.COLOR_RGB2BGR)
+                pygame_video_writer.write(frame)
+                
             pygame.display.flip()
             clock.tick(60)
         
