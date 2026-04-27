@@ -34,16 +34,17 @@ class EvaluationConfig:
         
         # Otimização de Performance
         self.synchronous = True
-        self.fixed_delta_seconds = 0.1
+        self.fixed_delta_seconds = 0.01
         self.disable_camera = False
         self.max_fps = 60
+        self.no_rendering = True
         
         # Visualização
         self.display_width = 1280
         self.display_height = 720
         
         # Modelo
-        self.q_table_path = "assets/q_table.npy"
+        self.q_table_path = "assets/q_table_backup_20260427_004341.npy" #"assets/q_table.npy"
         self.load_pretrained = True
         
         # Estado discretizado
@@ -56,8 +57,8 @@ class EvaluationConfig:
         self.success_distance = 2000
         
         # Gravação
-        self.record_pygame = True
-        self.record_carla = True
+        self.record_pygame = False
+        self.record_carla = False
         self.pygame_video_path = "evaluation_pygame.mp4"
         self.carla_rec_path = "evaluation_carla.log"
 
@@ -65,36 +66,39 @@ class EvaluationConfig:
 class CameraManager:
     """Gerencia a câmera de visualização."""
     
-    def __init__(self, vehicle, world, width=1280, height=720):
+    def __init__(self, vehicle, world, width=1280, height=720, transform=None, attachment_type=carla.AttachmentType.SpringArmGhost):
         self.vehicle = vehicle
         self.world = world
         self.width = width
         self.height = height
+        self.transform = transform
+        self.attachment_type = attachment_type
         self.surface = None
         self.sensor = None
         self._setup_camera()
     
     def _setup_camera(self):
-        """Configura a câmera RGB com base na posição do automatic_control.py."""
+        """Configura a câmera RGB."""
         blueprint = self.world.get_blueprint_library().find('sensor.camera.rgb')
         blueprint.set_attribute('image_size_x', str(self.width))
         blueprint.set_attribute('image_size_y', str(self.height))
         
-        # Posição da câmera 
-        bound_x = 0.5 + self.vehicle.bounding_box.extent.x
-        bound_y = 0.5 + self.vehicle.bounding_box.extent.y
-        bound_z = 0.5 + self.vehicle.bounding_box.extent.z
-        
-        # Usando a câmera traseira
-        cam_transform = carla.Transform(
-            carla.Location(x=-2.0*bound_x, y=+0.0*bound_y, z=2.0*bound_z),
-            carla.Rotation(pitch=8.0)
-        )
+        if self.transform is None:
+            bound_x = 0.5 + self.vehicle.bounding_box.extent.x
+            bound_y = 0.5 + self.vehicle.bounding_box.extent.y
+            bound_z = 0.5 + self.vehicle.bounding_box.extent.z
+            
+            # Usando a câmera traseira
+            self.transform = carla.Transform(
+                carla.Location(x=-2.0*bound_x, y=+0.0*bound_y, z=2.0*bound_z),
+                carla.Rotation(pitch=8.0)
+            )
+            
         self.sensor = self.world.spawn_actor(
             blueprint,
-            cam_transform,
+            self.transform,
             attach_to=self.vehicle,
-            attachment_type=carla.AttachmentType.SpringArmGhost
+            attachment_type=self.attachment_type
         )
         self.sensor.listen(self._process_image)
     
@@ -107,10 +111,10 @@ class CameraManager:
         array = array[:, :, ::-1]
         self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
     
-    def render(self, display):
+    def render(self, display, pos=(0, 0)):
         """Renderiza câmera."""
         if self.surface is not None:
-            display.blit(self.surface, (0, 0))
+            display.blit(self.surface, pos)
     
     def destroy(self):
         """Destrói câmera."""
@@ -242,6 +246,105 @@ def get_observation(vehicle, world):
     }
 
 
+def generate_map_images(world, trajectory, base_name="evaluation_result"):
+    """Gera e salva a visão superior do mapa e o trajeto percorrido."""
+    try:
+        print("\nGerando imagens do mapa. Aguarde...")
+        
+        # Pular os primeiros 10 frames da trajetória (ignora solavancos iniciais do spawn)
+        if trajectory and len(trajectory) > 10:
+            trajectory = trajectory[10:]
+            
+        # Pegar waypoints para desenhar o mapa (espaçamento de 2.0 metros)
+        waypoints = world.get_map().generate_waypoints(2.0)
+        
+        # Encontrar limites do mapa
+        min_x = min(wp.transform.location.x for wp in waypoints)
+        max_x = max(wp.transform.location.x for wp in waypoints)
+        min_y = min(wp.transform.location.y for wp in waypoints)
+        max_y = max(wp.transform.location.y for wp in waypoints)
+        
+        # Considerar também os limites da trajetória
+        if trajectory:
+            min_x = min(min_x, min(p[0] for p in trajectory))
+            max_x = max(max_x, max(p[0] for p in trajectory))
+            min_y = min(min_y, min(p[1] for p in trajectory))
+            max_y = max(max_y, max(p[1] for p in trajectory))
+            
+        # Adicionar margem de respiro
+        padding = 50.0
+        min_x -= padding; max_x += padding
+        min_y -= padding; max_y += padding
+        
+        # Calcular dimensões da imagem (max 1500 pixels de largura/altura)
+        width_m = max_x - min_x
+        height_m = max_y - min_y
+        scale = 1500.0 / max(width_m, height_m, 1.0)
+        
+        img_w = int(width_m * scale)
+        img_h = int(height_m * scale)
+        
+        # Criar imagem base (fundo branco)
+        map_img = np.ones((img_h, img_w, 3), dtype=np.uint8) * 255
+        
+        def to_pixel(x, y):
+            px = int((x - min_x) * scale)
+            py = int((y - min_y) * scale)
+            return (px, py)
+            
+        # Desenhar eixos / grid de referência (a cada 100 metros)
+        grid_step = 100
+        
+        # Linhas Verticais (Eixo X)
+        start_x = int(math.ceil(min_x / grid_step)) * grid_step
+        for x_m in range(start_x, int(max_x), grid_step):
+            px, _ = to_pixel(x_m, min_y)
+            cv2.line(map_img, (px, 0), (px, img_h), (0, 0, 0), 1)
+            cv2.putText(map_img, f"{x_m}m", (px + 5, img_h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            
+        # Linhas Horizontais (Eixo Y)
+        start_y = int(math.ceil(min_y / grid_step)) * grid_step
+        for y_m in range(start_y, int(max_y), grid_step):
+            _, py = to_pixel(min_x, y_m)
+            cv2.line(map_img, (0, py), (img_w, py), (0, 0, 0), 1)
+            cv2.putText(map_img, f"{y_m}m", (15, py - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            
+        # Desenhar ruas
+        for wp in waypoints:
+            px, py = to_pixel(wp.transform.location.x, wp.transform.location.y)
+            cv2.circle(map_img, (px, py), max(int(2 * scale), 1), (60, 60, 60), -1)
+            
+        # Salvar mapa base
+        cv2.imwrite(f"{base_name}_map.png", map_img)
+        
+        # Desenhar trajetória
+        traj_img = map_img.copy()
+        if len(trajectory) > 1:
+            # Desenhar linha do trajeto
+            for i in range(len(trajectory) - 1):
+                p1 = to_pixel(trajectory[i][0], trajectory[i][1])
+                p2 = to_pixel(trajectory[i+1][0], trajectory[i+1][1])
+                # OpenCV usa BGR. Laranja = (0, 150, 255)
+                cv2.line(traj_img, p1, p2, (0, 150, 255), max(int(1 * scale), 2))
+            
+            # Ponto Inicial (Verde)
+            p_start = to_pixel(trajectory[0][0], trajectory[0][1])
+            cv2.circle(traj_img, p_start, max(int(2 * scale), 4), (0, 255, 0), -1)
+            # cv2.putText(traj_img, "INICIO", (p_start[0] + 10, p_start[1] - 10), 
+            #             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            # Ponto Final (Vermelho)
+            p_end = to_pixel(trajectory[-1][0], trajectory[-1][1])
+            cv2.circle(traj_img, p_end, max(int(2 * scale), 4), (0, 0, 255), -1)
+            # cv2.putText(traj_img, "FIM", (p_end[0] + 10, p_end[1] - 10), 
+            #             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        
+        cv2.imwrite(f"{base_name}_trajectory.png", traj_img)
+        print(f"-> Imagens salvas: {base_name}_map.png e {base_name}_trajectory.png")
+        
+    except Exception as e:
+        print(f"Erro ao gerar imagens do mapa: {e}")
+
 
 def main():
     """Loop principal de avaliação."""
@@ -281,6 +384,7 @@ def main():
     settings = world.get_settings()
     settings.synchronous_mode = config.synchronous
     settings.fixed_delta_seconds = config.fixed_delta_seconds
+    settings.no_rendering_mode = config.no_rendering
     if config.max_fps:
         settings.max_substep_delta_time = 1.0 / config.max_fps
         settings.max_substeps = 1
@@ -288,6 +392,7 @@ def main():
     
     vehicle = None
     camera_manager = None
+    bird_camera_manager = None
     pygame_video_writer = None
     
     try:
@@ -302,6 +407,13 @@ def main():
         spawn_point = random.choice(spawn_points)
         vehicle = world.spawn_actor(vehicle_bp, spawn_point)
         vehicle.set_autopilot(False)
+        
+        # Simular alguns frames silenciosamente para o carro assentar no chão
+        for _ in range(20):
+            if config.synchronous:
+                world.tick()
+            else:
+                world.wait_for_tick()
         
         # Inicializar discretizador
         discretizer = StateDiscretizer(config.discretizer_bins)
@@ -321,8 +433,17 @@ def main():
         })
         
         # Criar câmera
-        print("Configurando câmera...")
+        print("Configurando câmeras...")
         camera_manager = CameraManager(vehicle, world, config.display_width, config.display_height)
+        
+        # Criar câmera Bird View
+        bird_w, bird_h = 320, 240
+        bird_transform = carla.Transform(carla.Location(z=20.0), carla.Rotation(pitch=-90.0))
+        bird_camera_manager = CameraManager(
+            vehicle, world, bird_w, bird_h,
+            transform=bird_transform,
+            attachment_type=carla.AttachmentType.Rigid
+        )
         
         # Criar HUD
         hud = HUD(config.display_width, config.display_height)
@@ -340,9 +461,6 @@ def main():
             )
             print(f"Gravador Pygame iniciado. Salvando em: {config.pygame_video_path}")
             
-        # Referência para o Spectator (Câmera do carla.exe)
-        spectator = world.get_spectator()
-        
         # Observação inicial
         print("Iniciando avaliação...")
         
@@ -350,6 +468,9 @@ def main():
         previous_location = vehicle.get_location()
         steps = 0
         done = False
+        
+        # Rastrear trajetória para o mapa no final
+        trajectory = [(previous_location.x, previous_location.y)]
         
         
         start_time = datetime.now()
@@ -384,12 +505,6 @@ def main():
             else:
                 world.wait_for_tick()
             
-            # Atualizar a visão do spectator no carla.exe (visão superior)
-            transform = vehicle.get_transform()
-            position = transform.location + carla.Location(z=40.0)
-            rotation = carla.Rotation(pitch=-90.0, yaw=0.0)
-            spectator.set_transform(carla.Transform(position, rotation))
-            
             # Atualizar observação
             observation = get_observation(vehicle, world)
             current_location = vehicle.get_location()
@@ -400,6 +515,9 @@ def main():
             distance = math.sqrt(dx*dx + dy*dy)
             distance_traveled += distance
             previous_location = current_location
+            
+            # Salvar ponto da trajetória
+            trajectory.append((current_location.x, current_location.y))
             
             # Verificar se chegou ao fim
             done = observation.get("offroad", False) or distance_traveled >= config.success_distance
@@ -412,7 +530,13 @@ def main():
             
             # Renderizar
             display.fill((0, 0, 0))
-            camera_manager.render(display)
+            camera_manager.render(display, pos=(0, 0))
+            
+            # Renderizar Bird View (com borda para destacar do fundo)
+            bird_pos = (config.display_width - bird_w - 20, 20)
+            pygame.draw.rect(display, (200, 200, 200), (bird_pos[0]-2, bird_pos[1]-2, bird_w+4, bird_h+4), 2)
+            bird_camera_manager.render(display, pos=bird_pos)
+            
             hud.tick(vehicle, distance_traveled, steps, action, observation, speed_kmh)
             hud.render(display)
             
@@ -440,6 +564,9 @@ def main():
         print(f"Distância: {distance_traveled:.2f}m")
         print(f"Sucesso: {'SIM' if distance_traveled >= config.success_distance else 'NÃO'}")
         
+        # Gerar imagens de resumo final do trajeto
+        generate_map_images(world, trajectory)
+        
         # Manter tela visível por 3 segundos
         for _ in range(180):
             for event in pygame.event.get():
@@ -458,6 +585,8 @@ def main():
         try:
             if camera_manager:
                 camera_manager.destroy()
+            if bird_camera_manager:
+                bird_camera_manager.destroy()
             if vehicle:
                 vehicle.destroy()
         except Exception as e:
