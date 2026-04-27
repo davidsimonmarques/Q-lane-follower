@@ -56,7 +56,7 @@ class EvaluationConfig:
 
 
 class CameraManager:
-    """Gerencia câmera traseira."""
+    """Gerencia a câmera de visualização."""
     
     def __init__(self, vehicle, world, width=1280, height=720):
         self.vehicle = vehicle
@@ -68,20 +68,26 @@ class CameraManager:
         self._setup_camera()
     
     def _setup_camera(self):
-        """Configura câmera RGB traseira."""
+        """Configura a câmera RGB com base na posição do automatic_control.py."""
         blueprint = self.world.get_blueprint_library().find('sensor.camera.rgb')
         blueprint.set_attribute('image_size_x', str(self.width))
         blueprint.set_attribute('image_size_y', str(self.height))
         
-        # Câmera traseira (vista por trás do carro)
+        # Posição da câmera 
+        bound_x = 0.5 + self.vehicle.bounding_box.extent.x
+        bound_y = 0.5 + self.vehicle.bounding_box.extent.y
+        bound_z = 0.5 + self.vehicle.bounding_box.extent.z
+        
+        # Usando a câmera traseira
         cam_transform = carla.Transform(
-            carla.Location(x=-4, z=2.5),
-            carla.Rotation(pitch=0)
+            carla.Location(x=-2.0*bound_x, y=+0.0*bound_y, z=2.0*bound_z),
+            carla.Rotation(pitch=8.0)
         )
         self.sensor = self.world.spawn_actor(
             blueprint,
             cam_transform,
-            attach_to=self.vehicle
+            attach_to=self.vehicle,
+            attachment_type=carla.AttachmentType.SpringArmGhost
         )
         self.sensor.listen(self._process_image)
     
