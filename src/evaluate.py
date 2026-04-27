@@ -117,48 +117,76 @@ class HUD:
     
     def __init__(self, width, height):
         self.dim = (width, height)
-        font = pygame.font.Font(pygame.font.get_default_font(), 20)
-        self._font_mono = pygame.font.Font(None, 24)
+        font_name = 'courier' if os.name == 'nt' else 'mono'
+        fonts = [x for x in pygame.font.get_fonts() if font_name in x]
+        default_font = 'ubuntumono'
+        mono = default_font if default_font in fonts else fonts[0]
+        mono = pygame.font.match_font(mono)
+        self._font_mono = pygame.font.Font(mono, 12 if os.name == 'nt' else 14)
         self._info_text = []
     
     def tick(self, vehicle, distance, steps, action, observation, speed_kmh):
         """Atualiza informações do HUD."""
         loc = vehicle.get_location()
         rot = vehicle.get_transform().rotation
+        control = vehicle.get_control()
         
         action_names = ["L-Max", "L-Hard", "L-Soft", "Straight", "R-Soft", "R-Hard", "R-Max"]
         
         self._info_text = [
-            f'Step:     {steps:6d}',
-            f'Distance: {distance:8.1f} m',
+            'Step:    % 7d' % steps,
+            'Distance:% 8.1f m' % distance,
             '',
-            f'Speed:    {speed_kmh:6.1f} km/h',
-            f'Location: ({loc.x:7.1f}, {loc.y:7.1f})',
-            f'Height:   {loc.z:7.1f} m',
-            f'Yaw:      {rot.yaw:7.1f}°',
+            'Speed:   % 7.1f km/h' % speed_kmh,
+            'Location:% 20s' % ('(% 5.1f, % 5.1f)' % (loc.x, loc.y)),
+            'Height:  % 7.1f m' % loc.z,
+            'Yaw:     % 7.1f deg' % rot.yaw,
             '',
-            f'Lane Off: {observation.get("lane_offset", 0.0):7.3f} m',
-            f'Head Err: {observation.get("heading_error", 0.0):7.3f} rad',
-            f'Offroad:  {"YES" if observation.get("offroad", False) else "NO"}',
-            f'Action:   {action_names[action]}',
+            'Lane Off:% 7.3f m' % observation.get("lane_offset", 0.0),
+            'Head Err:% 7.3f rad' % observation.get("heading_error", 0.0),
+            'Offroad: % 10s' % ("YES" if observation.get("offroad", False) else "NO"),
+            'Action:  % 10s' % action_names[action],
+            '',
+            ('Throttle:', control.throttle, 0.0, 1.0),
+            ('Steer:', control.steer, -1.0, 1.0)
         ]
     
     def render(self, display):
         """Renderiza painel HUD."""
-        # Painel semi-transparente
-        panel_width = 250
-        panel = pygame.Surface((panel_width, self.dim[1]))
-        panel.set_alpha(180)
-        panel.fill((0, 0, 0))
-        display.blit(panel, (0, 0))
-        
-        # Renderizar texto
-        v_offset = 10
-        for line in self._info_text:
-            if line:
-                text_surface = self._font_mono.render(line, True, (255, 255, 255))
-                display.blit(text_surface, (10, v_offset))
-            v_offset += 28
+        info_surface = pygame.Surface((220, self.dim[1]))
+        info_surface.set_alpha(100)
+        display.blit(info_surface, (0, 0))
+        v_offset = 4
+        bar_h_offset = 100
+        bar_width = 106
+        for item in self._info_text:
+            if v_offset + 18 > self.dim[1]:
+                break
+            if isinstance(item, list):
+                if len(item) > 1:
+                    points = [(x + 8, v_offset + 8 + (1 - y) * 30) for x, y in enumerate(item)]
+                    pygame.draw.lines(display, (255, 136, 0), False, points, 2)
+                item = None
+                v_offset += 18
+            elif isinstance(item, tuple):
+                if isinstance(item[1], bool):
+                    rect = pygame.Rect((bar_h_offset, v_offset + 8), (6, 6))
+                    pygame.draw.rect(display, (255, 255, 255), rect, 0 if item[1] else 1)
+                else:
+                    rect_border = pygame.Rect((bar_h_offset, v_offset + 8), (bar_width, 6))
+                    pygame.draw.rect(display, (255, 255, 255), rect_border, 1)
+                    fig = (item[1] - item[2]) / (item[3] - item[2])
+                    if item[2] < 0.0:
+                        rect = pygame.Rect(
+                            (bar_h_offset + fig * (bar_width - 6), v_offset + 8), (6, 6))
+                    else:
+                        rect = pygame.Rect((bar_h_offset, v_offset + 8), (fig * bar_width, 6))
+                    pygame.draw.rect(display, (255, 255, 255), rect)
+                item = item[0]
+            if item:  # At this point has to be a str.
+                surface = self._font_mono.render(item, True, (255, 255, 255))
+                display.blit(surface, (8, v_offset))
+            v_offset += 18
 
 
 def get_observation(vehicle, world):
