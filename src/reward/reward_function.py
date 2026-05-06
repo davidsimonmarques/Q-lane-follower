@@ -20,7 +20,7 @@ class RewardFunction:
         
         # Recompensa por manter-se na pista (maior no centro)
         reward = 1.0 - (lane_offset / 2.0)  # 1.0 no centro, 0 nas bordas
-        
+        # reward -= self.heading_penalty * abs(observation.get("heading_error", 0.0))  # Penalidade por erro de direção
         # Bônus de velocidade (substituindo o bônus de progresso)
         # Normalizado entre 0 e 0.15. Consideramos 10 m/s (~36 km/h) como referência.
         speed = observation.get("speed", 0.0)

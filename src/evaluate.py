@@ -11,6 +11,8 @@ import cv2
 import sys
 import logging
 from datetime import datetime
+import csv
+from typing import Optional
 
 # Suprimir logs verbosos do CARLA
 logging.getLogger('carla').setLevel(logging.CRITICAL)
@@ -44,7 +46,7 @@ class EvaluationConfig:
         self.display_height = 720
         
         # Modelo
-        self.q_table_path = "assets/q_table_backup_20260427_004341.npy" #"assets/q_table.npy"
+        self.q_table_path = "assets/q_table.npy" #"assets/q_table.npy"
         self.load_pretrained = True
         
         # Estado discretizado
@@ -57,11 +59,65 @@ class EvaluationConfig:
         self.success_distance = 2000
         
         # Gravação
-        self.record_pygame = False
-        self.record_carla = False
+        self.record_pygame = True
+        self.record_carla = True
         self.pygame_video_path = "evaluation_pygame.mp4"
-        self.carla_rec_path = "evaluation_carla.log"
+        self.carla_rec_path = os.path.abspath("evaluation_carla.log").replace('\\', '/')
 
+class EvaluationDataLogger:
+    """Logger para salvar dados de avaliação passo a passo em CSV."""
+
+    def __init__(self, log_dir: str = "logs", filename: Optional[str] = None):
+        self.log_dir = log_dir
+        
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"evaluation_data_{timestamp}.csv"
+        
+        self.filepath = os.path.join(log_dir, filename)
+        os.makedirs(log_dir, exist_ok=True)
+
+        self.csv_file = open(self.filepath, 'w', newline='', encoding='utf-8')
+        self.writer = csv.writer(self.csv_file)
+        
+        # Escrever cabeçalho
+        self.writer.writerow([
+            'timestamp_ms',
+            'step',
+            'speed_ms',
+            'speed_kmh',
+            'lane_offset',
+            'heading_error',
+            'action',
+            'throttle',
+            'steer',
+            'brake',
+            'distance_traveled',
+            'offroad'
+        ])
+
+    def log_step(self, timestamp_ms: float, step: int, observation: dict, action: int, control: carla.VehicleControl, distance_traveled: float):
+        """Registra os dados de um único passo de simulação."""
+        self.writer.writerow([
+            int(timestamp_ms),
+            step,
+            f"{observation.get('speed', 0.0):.4f}",
+            f"{observation.get('speed', 0.0) * 3.6:.4f}",
+            f"{observation.get('lane_offset', 0.0):.4f}",
+            f"{observation.get('heading_error', 0.0):.4f}",
+            action,
+            f"{control.throttle:.4f}",
+            f"{control.steer:.4f}",
+            f"{control.brake:.4f}",
+            f"{distance_traveled:.4f}",
+            observation.get('offroad', False)
+        ])
+
+    def close(self):
+        """Fecha o arquivo CSV."""
+        if self.csv_file:
+            self.csv_file.close()
+            print(f"\nLog de avaliação salvo em: {self.filepath}")
 
 class CameraManager:
     """Gerencia a câmera de visualização."""
@@ -327,6 +383,23 @@ def generate_map_images(world, trajectory, base_name="evaluation_result"):
                 # OpenCV usa BGR. Laranja = (0, 150, 255)
                 cv2.line(traj_img, p1, p2, (0, 150, 255), max(int(1 * scale), 2))
             
+            # Desenhar setas indicativas de direção ao longo do trajeto (a cada 10 metros)
+            dist_accum = 0.0
+            for i in range(1, len(trajectory) - 1):
+                dx = trajectory[i][0] - trajectory[i-1][0]
+                dy = trajectory[i][1] - trajectory[i-1][1]
+                dist_accum += math.hypot(dx, dy)
+                
+                if dist_accum >= 10.0:
+                    p1 = to_pixel(trajectory[i][0], trajectory[i][1])
+                    # Buscar um ponto mais à frente para garantir um tamanho legível da seta na imagem
+                    for j in range(i + 1, len(trajectory)):
+                        p2 = to_pixel(trajectory[j][0], trajectory[j][1])
+                        if math.hypot(p2[0] - p1[0], p2[1] - p1[1]) > 15:  # Pelo menos 15 pixels de tamanho
+                            cv2.arrowedLine(traj_img, p1, p2, (0, 150, 255), max(int(1.5 * scale), 2), tipLength=0.4)
+                            break
+                    dist_accum = 0.0
+            
             # Ponto Inicial (Verde)
             p_start = to_pixel(trajectory[0][0], trajectory[0][1])
             cv2.circle(traj_img, p_start, max(int(2 * scale), 4), (0, 255, 0), -1)
@@ -394,6 +467,7 @@ def main():
     camera_manager = None
     bird_camera_manager = None
     pygame_video_writer = None
+    evaluation_logger = None
     
     try:
         # Inicializar ambiente CARLA
@@ -461,6 +535,9 @@ def main():
             )
             print(f"Gravador Pygame iniciado. Salvando em: {config.pygame_video_path}")
             
+        # Inicializar logger de avaliação
+        evaluation_logger = EvaluationDataLogger()
+
         # Observação inicial
         print("Iniciando avaliação...")
         
@@ -526,6 +603,19 @@ def main():
             speed = observation["speed"]
             speed_kmh = speed * 3.6
             
+            # Logar dados do passo
+            snapshot = world.get_snapshot()
+            sim_time_ms = snapshot.timestamp.elapsed_seconds * 1000
+            if evaluation_logger:
+                evaluation_logger.log_step(
+                    sim_time_ms,
+                    steps,
+                    observation,
+                    action,
+                    control,
+                    distance_traveled
+                )
+
             steps += 1
             
             # Renderizar
@@ -582,7 +672,18 @@ def main():
     
     finally:
         # Limpeza
+        # Limpeza e SALVAR GRAVAÇÕES
         try:
+            if evaluation_logger:
+                evaluation_logger.close()
+
+            if pygame_video_writer:
+                pygame_video_writer.release()
+                print(f"Vídeo Pygame salvo em: {config.pygame_video_path}")
+            if carla_recorder_started:
+                client.stop_recorder()
+                print(f"Gravação CARLA salva em: {config.carla_rec_path}")
+                
             if camera_manager:
                 camera_manager.destroy()
             if bird_camera_manager:
